@@ -86,6 +86,73 @@ static void test_bad_input_ignored() {
     CHECK(e.snapshot().total_trades == 0);
 }
 
+static void test_window_buffer_growth() {
+    // Start tiny so the circular buffer has to grow and wrap repeatedly.
+    AnalyticsEngine e(10.0, 0.0, 50, 16);
+    double ref_notional = 0.0, ref_size = 0.0;
+    for (int i = 0; i < 5000; ++i) {
+        const double ts = i * 0.01;  // 1000 trades per 10 s window
+        const double px = 100.0 + (i % 7);
+        e.on_trade({ts, px, 1.0, Side::Buy});
+    }
+    // Reference: trades with ts >= 49.99 - 10 = 39.99 -> i in [3999, 4999]
+    for (int i = 3999; i < 5000; ++i) {
+        ref_notional += 100.0 + (i % 7);
+        ref_size += 1.0;
+    }
+    const Snapshot s = e.snapshot();
+    CHECK(s.trades_in_window == 1001);
+    CHECK(e.capacity() >= 1001);
+    CHECK(near(s.vwap, ref_notional / ref_size, 1e-6));
+    CHECK(near(s.trade_rate, 100.1, 1e-9));
+}
+
+static void test_vpin_basic() {
+    Vpin v(10.0, 4);
+    CHECK(near(v.value(), 0.0));
+    v.add(10.0, Side::Buy);                      // bucket 1: |10 - 0| = 10
+    CHECK(v.completed_buckets() == 1);
+    CHECK(near(v.value(), 1.0));
+    v.add(5.0, Side::Buy);
+    v.add(5.0, Side::Sell);                      // bucket 2: 0
+    CHECK(near(v.value(), 0.5));
+    v.add(15.0, Side::Sell);                     // bucket 3: 10, and 5 carried over
+    CHECK(v.completed_buckets() == 3);
+    CHECK(near(v.value(), 20.0 / 30.0));
+    v.add(5.0, Side::Buy);                       // bucket 4: |5 - 5| = 0
+    CHECK(near(v.value(), 20.0 / 40.0));
+    v.add(10.0, Side::Unknown);                  // bucket 5 evicts bucket 1
+    CHECK(v.completed_buckets() == 4);
+    CHECK(near(v.value(), 10.0 / 40.0));
+}
+
+static void test_vpin_huge_trade() {
+    Vpin v(1.0, 5);
+    v.add(0.5, Side::Sell);
+    v.add(1e9 + 0.25, Side::Buy);                // must not loop a billion times
+    CHECK(v.completed_buckets() == 5);
+    CHECK(near(v.value(), 1.0));
+}
+
+static void test_vpin_autocalibration() {
+    AnalyticsEngine e(10.0);
+    for (int i = 0; i <= 10; ++i) e.on_trade({double(i), 100.0, 2.0, Side::Buy});
+    Snapshot s = e.snapshot();                   // 22 units seen over 10 s
+    CHECK(near(s.vpin_bucket_volume, 2.2));
+    CHECK(s.vpin_buckets == 0);
+    for (int i = 11; i <= 20; ++i) e.on_trade({double(i), 100.0, 2.0, Side::Buy});
+    s = e.snapshot();
+    CHECK(s.vpin_buckets == 9);                  // 20 units / 2.2
+    CHECK(near(s.vpin, 1.0));
+
+    AnalyticsEngine fixed(10.0, 4.0, 3);
+    fixed.on_trade({0.0, 100.0, 4.0, Side::Sell});
+    CHECK(near(fixed.snapshot().vpin, 1.0));
+    fixed.reset();
+    CHECK(fixed.snapshot().total_trades == 0);
+    CHECK(near(fixed.snapshot().vpin_bucket_volume, 4.0));
+}
+
 static void test_ring_basic() {
     SpscRingBuffer<int> q(4);
     CHECK(q.capacity() == 4);
@@ -134,6 +201,10 @@ int main() {
     test_volatility();
     test_quote_metrics();
     test_bad_input_ignored();
+    test_window_buffer_growth();
+    test_vpin_basic();
+    test_vpin_huge_trade();
+    test_vpin_autocalibration();
     test_ring_basic();
     test_ring_threaded();
     if (g_failures == 0) std::printf("all tests passed\n");

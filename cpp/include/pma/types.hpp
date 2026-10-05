@@ -32,6 +32,10 @@ struct Snapshot {
     double volume = 0.0;           // over the rolling window
     double trade_imbalance = 0.0;  // signed volume / volume, in [-1, 1]
     double volatility = 0.0;       // stddev of trade-to-trade log returns in window
+    double trade_rate = 0.0;       // trades per second over the window
+    double vpin = 0.0;             // flow toxicity in [0, 1]; 0 until first bucket closes
+    double vpin_bucket_volume = 0.0;      // 0 while auto-calibrating
+    std::uint64_t vpin_buckets = 0;       // completed buckets currently averaged
     std::uint64_t trades_in_window = 0;
     std::uint64_t total_trades = 0;
 };

@@ -18,6 +18,10 @@ PYBIND11_MODULE(pma_core, m) {
         .def_readonly("volume", &Snapshot::volume)
         .def_readonly("trade_imbalance", &Snapshot::trade_imbalance)
         .def_readonly("volatility", &Snapshot::volatility)
+        .def_readonly("trade_rate", &Snapshot::trade_rate)
+        .def_readonly("vpin", &Snapshot::vpin)
+        .def_readonly("vpin_bucket_volume", &Snapshot::vpin_bucket_volume)
+        .def_readonly("vpin_buckets", &Snapshot::vpin_buckets)
         .def_readonly("trades_in_window", &Snapshot::trades_in_window)
         .def_readonly("total_trades", &Snapshot::total_trades)
         .def("as_dict", [](const Snapshot& s) {
@@ -31,13 +35,21 @@ PYBIND11_MODULE(pma_core, m) {
             d["volume"] = s.volume;
             d["trade_imbalance"] = s.trade_imbalance;
             d["volatility"] = s.volatility;
+            d["trade_rate"] = s.trade_rate;
+            d["vpin"] = s.vpin;
+            d["vpin_bucket_volume"] = s.vpin_bucket_volume;
+            d["vpin_buckets"] = s.vpin_buckets;
             d["trades_in_window"] = s.trades_in_window;
             d["total_trades"] = s.total_trades;
             return d;
         });
 
     py::class_<AnalyticsEngine>(m, "AnalyticsEngine")
-        .def(py::init<double>(), py::arg("window_seconds") = 60.0)
+        .def(py::init<double, double, std::size_t>(),
+             py::arg("window_seconds") = 60.0,
+             py::arg("vpin_bucket_volume") = 0.0,
+             py::arg("vpin_num_buckets") = 50,
+             "vpin_bucket_volume <= 0 auto-calibrates from the first window of trading")
         .def("on_trade",
              [](AnalyticsEngine& e, double ts, double price, double size, int side) {
                  Trade t;
